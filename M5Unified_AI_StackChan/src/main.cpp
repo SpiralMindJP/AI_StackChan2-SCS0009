@@ -14,7 +14,8 @@ Avatar avatar;
 #include "AudioFileSourceHTTPSStream.h"
 #include "AudioOutputM5Speaker.h"
 
-#define SCS0009 // use Serial Servo
+#define SCS0009          // use Serial Servo
+#define USE_INTERNAL_MIC // use internal microphone for core2, coreS3
 
 #ifdef SCS0009
 #include <SCServo.h>
@@ -824,8 +825,7 @@ void StatusCallback(void *cbData, int code, const char *string)
 #define START_DEGREE_VALUE_X 90
 // #define START_DEGREE_VALUE_Y 90
 #define START_DEGREE_VALUE_Y 85 //
-#ifdef SCS0009
-#else
+#if !defined(SCS0009)
 ServoEasing servo_x;
 ServoEasing servo_y;
 #endif
@@ -891,8 +891,7 @@ void lipSync(void *args)
   }
 }
 
-#ifdef SCS0009
-#else
+#if !defined(SCS0009)
 void servo(void *args)
 {
   float gazeX, gazeY;
@@ -1075,23 +1074,32 @@ void setup()
                            // cfg.external_spk_detail.omit_atomic_spk = true; // exclude ATOMIC SPK
   // cfg.external_spk_detail.omit_spk_hat    = true; // exclude SPK HAT
   //   cfg.output_power = true;
+
+#ifdef USE_INTERNAL_MIC
+  cfg.internal_mic = true;
+#else
+  cfg.internal_mic = false;
+#endif
+
   M5.begin(cfg);
 
-  preallocateBuffer = (uint8_t *)malloc(preallocateBufferSize);
-  if (!preallocateBuffer)
-  {
-    M5.Display.printf("FATAL ERROR:  Unable to preallocate %d bytes for app\n", preallocateBufferSize);
-    for (;;)
-    {
-      delay(1000);
-    }
-  }
-  {
-    auto micConfig = M5.Mic.config();
-    micConfig.stereo = false;
-    micConfig.sample_rate = 16000;
-    M5.Mic.config(micConfig);
-  }
+// 外部マイク設定
+#if !defined(USE_INTERNAL_MIC)
+  M5.In_I2C.release();
+  auto mic_cfg = M5.Mic.config();
+#if defined(ARDUINO_M5Stack_Core_ESP32)
+  mic_cfg.pin_ws = 22;      // 白
+  mic_cfg.pin_data_in = 21; // 黄
+#elif defined(ARDUINO_M5STACK_Core2)
+  mic_cfg.pin_ws = 33;
+  mic_cfg.pin_data_in = 32;
+#elif defined(ARDUINO_M5STACK_CORES3)
+  mic_cfg.pin_ws = 2;
+  mic_cfg.pin_data_in = 1;
+#endif
+  M5.Mic.config(mic_cfg);
+#endif
+
   M5.Mic.begin();
 
   { /// custom setting
@@ -1103,8 +1111,7 @@ void setup()
   }
   //  M5.Speaker.begin();
 
-#ifdef SCS0009
-#else
+#if !defined(SCS0009)
   Servo_setup();
   delay(1000);
 #endif
@@ -1362,8 +1369,7 @@ void setup()
 
   avatar.init();
   avatar.addTask(lipSync, "lipSync");
-#ifdef SCS0009
-#else
+#if !defined(SCS0009)
   avatar.addTask(servo, "servo");
 #endif
   avatar.setSpeechFont(&fonts::efontJA_16);
