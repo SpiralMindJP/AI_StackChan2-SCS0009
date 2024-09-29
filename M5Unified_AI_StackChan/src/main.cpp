@@ -1085,7 +1085,7 @@ void setup()
 
 // 外部マイク設定
 #if !defined(USE_INTERNAL_MIC)
-  M5.In_I2C.release();
+  // M5.In_I2C.release();
   auto mic_cfg = M5.Mic.config();
 #if defined(ARDUINO_M5Stack_Core_ESP32)
   mic_cfg.pin_ws = 22;      // 白
@@ -1094,8 +1094,8 @@ void setup()
   mic_cfg.pin_ws = 33;
   mic_cfg.pin_data_in = 32;
 #elif defined(ARDUINO_M5STACK_CORES3)
-  mic_cfg.pin_ws = 2;
-  mic_cfg.pin_data_in = 1;
+  mic_cfg.pin_ws = 1;
+  mic_cfg.pin_data_in = 2;
 #endif
   M5.Mic.config(mic_cfg);
 #endif
