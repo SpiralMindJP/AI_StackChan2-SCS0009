@@ -13,8 +13,15 @@ Avatar avatar;
 #include <AudioGeneratorMP3.h>
 #include "AudioFileSourceHTTPSStream.h"
 #include "AudioOutputM5Speaker.h"
-// #include <ServoEasing.hpp> // https://github.com/ArminJo/ServoEasing
+
+#define SCS0009 // use Serial Servo
+
+#ifdef SCS0009
 #include <SCServo.h>
+#else
+#include <ServoEasing.hpp> // https://github.com/ArminJo/ServoEasing
+#endif
+
 #include "WebVoiceVoxTTS.h"
 
 #include <HTTPClient.h>
@@ -23,7 +30,11 @@ Avatar avatar;
 #include "rootCAgoogle.h"
 #include <ArduinoJson.h>
 #include <ESP32WebServer.h>
-// #include <ESPmDNS.h>
+#define ENABLE_MDNS
+#ifdef ENABLE_MDNS
+#define MDNS_HOST "stack-chan"
+#include <ESPmDNS.h>
+#endif
 #include <deque>
 #include "AudioWhisper.h"
 #include "Whisper.h"
@@ -44,18 +55,10 @@ std::deque<String> chatHistory;
 #define VOICEVOX_APIKEY "SET YOUR VOICEVOX APIKEY"
 #define STT_APIKEY "SET YOUR STT APIKEY"
 
-void sw_tone()
-{
-  M5.Mic.end();
-  M5.Speaker.tone(1000, 100);
-  delay(500);
-  M5.Speaker.end();
-  M5.Mic.begin();
-}
-
 #define USE_SERVO
 #ifdef USE_SERVO
 
+#ifdef SCS0009
 SCSCL sc;
 static u16 x_offset = 160;
 static u16 y_offset = 160;
@@ -71,6 +74,15 @@ void scsMove(u8 id, u16 degree, u16 offset = 0, u16 mtime = 300, u16 mspeed = 0,
 {
   sc.WritePos(id, convertSCS0009Pos(degree + offset), mtime, mspeed);
   delay(50 + aDelay);
+}
+
+void sw_tone()
+{
+  M5.Mic.end();
+  M5.Speaker.tone(1000, 100);
+  delay(500);
+  M5.Speaker.end();
+  M5.Mic.begin();
 }
 
 void initServoLoc()
@@ -105,15 +117,36 @@ void initServo()
   sc.pSerial = &Serial2;
 
   sc.PWMMode(1, false); // シリアルサーボモード
-
-  // initServoLoc();
 }
-
-#endif // USE_SERVO
+#else
+#if defined(ARDUINO_M5STACK_Core2)
+#define PORT_A
+// #define PORT_C
+#if defined(PORT_A)
+#define SERVO_PIN_X 33 // Core2 PORT A
+#define SERVO_PIN_Y 32
+#elif defined(PORT_C)
+#define SERVO_PIN_X 14 // Core2 PORT C (INTERNAL UART2)
+#define SERVO_PIN_Y 13
+#endif
+#elif defined(ARDUINO_M5STACK_FIRE)
+#define SERVO_PIN_X 21
+#define SERVO_PIN_Y 22
+#elif defined(ARDUINO_M5Stack_Core_ESP32)
+#define SERVO_PIN_X 21
+#define SERVO_PIN_Y 22
+#elif defined(ARDUINO_M5STACK_CORES3)
+#define SERVO_PIN_X 18 // CoreS3 PORT C
+#define SERVO_PIN_Y 17
+#endif
+#endif
+#endif
 
 /// set M5Speaker virtual channel (0-7)
 static constexpr uint8_t m5spk_virtual_channel = 0;
 
+// using namespace m5avatar;
+// Avatar avatar;
 const Expression expressions_table[] = {
     Expression::Neutral,
     Expression::Happy,
@@ -247,7 +280,7 @@ static const char ROLE_HTML[] PROGMEM = R"KEWL(
 String speech_text = "";
 String speech_text_buffer = "";
 DynamicJsonDocument chat_doc(1024 * 10);
-String json_ChatString = "{\"model\": \"gpt-3.5-turbo-0613\",\"messages\": [{\"role\": \"user\", \"content\": \""
+String json_ChatString = "{\"model\": \"gpt-4o-mini\",\"messages\": [{\"role\": \"user\", \"content\": \""
                          "\"}]}";
 String Role_JSON = "";
 
@@ -267,7 +300,7 @@ bool init_chat_doc(const char *data)
 
 void handleRoot()
 {
-  server.send(200, "text/plain", "hello from m5stack!");
+  server.send(200, "text/html", "<html><head><meta charset=\"UTF-8\"/></head><body><pre>hello from m5stack!\n&boxdr;&boxh;&boxh;&boxh;&boxdl;\n&boxv;&#729;_&#729;&boxv;\n&boxur;&boxh;&boxh;&boxh;&boxul;</pre></body></html>");
 }
 
 void handleNotFound()
@@ -738,7 +771,8 @@ void handle_setting()
         led_onoff = 0;
       nvs_set_u8(nvs_handle, "led", led_onoff);
     }
-    nvs_set_u8(nvs_handle, "speaker", speaker_no);
+    if (speaker != "")
+      nvs_set_u8(nvs_handle, "speaker", speaker_no);
 
     nvs_close(nvs_handle);
   }
@@ -790,8 +824,11 @@ void StatusCallback(void *cbData, int code, const char *string)
 #define START_DEGREE_VALUE_X 90
 // #define START_DEGREE_VALUE_Y 90
 #define START_DEGREE_VALUE_Y 85 //
-// ServoEasing servo_x;
-// ServoEasing servo_y;
+#ifdef SCS0009
+#else
+ServoEasing servo_x;
+ServoEasing servo_y;
+#endif
 #endif
 
 bool servo_home = false;
@@ -813,60 +850,108 @@ void lipSync(void *args)
     }
     float open = (float)level / 15000.0;
     avatar->setMouthOpenRatio(open);
+
+#ifdef SCS0009
     if (open > 0.01)
     {
       scsMove(y_id, -(int)(open * 20), y_offset, 150);
       delay(150);
     }
+#endif
 
     avatar->getGaze(&gazeY, &gazeX);
     avatar->setRotation(gazeX * 5);
 
+#ifdef SCS0009
     if (!servo_home)
     {
-      // avatar->getGaze(&gazeY, &gazeX);
-      //  servo_x.setEaseTo(START_DEGREE_VALUE_X + (int)(15.0 * gazeX));
-      // char buff[100];
-
       scsMove(x_id, (int)(15.0 * gazeX), x_offset);
       if (gazeY < 0)
       {
         int tmp = (int)(10 * gazeY);
         if (tmp > 10)
           tmp = 10;
-        // servo_y.setEaseTo(START_DEGREE_VALUE_Y + tmp);
         scsMove(y_id, (int)tmp, y_offset);
-        // sprintf(buff, "Y < 0 - > x=%d Y=%d", (int)(15.0 * gazeX), tmp);
-        // avatar->setSpeechText(buff);
       }
       else
       {
-        // servo_y.setEaseTo(START_DEGREE_VALUE_Y + (int)(10.0 * gazeY));
         scsMove(y_id, (int)(10 * gazeY), y_offset);
-        // sprintf(buff, "Y >=0 -> x=%d Y=%d", (int)(15.0 * gazeX), (int)(10 * gazeY));
-        // avatar->setSpeechText(buff);
       }
     }
     else
     {
       avatar->setRotation(gazeX * 5);
       float b = avatar->getBreath();
-      // servo_x.setEaseTo(START_DEGREE_VALUE_X);
-      // servo_y.setEaseTo(START_DEGREE_VALUE_Y + b * 5);
-      // servo_y.setEaseTo(START_DEGREE_VALUE_Y);
-      // scsMove(x_id, 0, x_offset);
-
-      // char buff[100];
-      // sprintf(buff, "OTHER -> x=%d Y=%d", (int)(15.0 * gazeX), int(b * 5));
-      // avatar->setSpeechText(buff);
 
       scsMove(x_id, 0, x_offset);
       scsMove(y_id, int(b * 5), y_offset);
     }
-
+#endif
     delay(50);
   }
 }
+
+#ifdef SCS0009
+#else
+void servo(void *args)
+{
+  float gazeX, gazeY;
+  DriveContext *ctx = (DriveContext *)args;
+  Avatar *avatar = ctx->getAvatar();
+  for (;;)
+  {
+#ifdef USE_SERVO
+    if (!servo_home)
+    {
+      avatar->getGaze(&gazeY, &gazeX);
+      servo_x.setEaseTo(START_DEGREE_VALUE_X + (int)(15.0 * gazeX));
+      if (gazeY < 0)
+      {
+        int tmp = (int)(10.0 * gazeY);
+        if (tmp > 10)
+          tmp = 10;
+        servo_y.setEaseTo(START_DEGREE_VALUE_Y + tmp);
+      }
+      else
+      {
+        servo_y.setEaseTo(START_DEGREE_VALUE_Y + (int)(10.0 * gazeY));
+      }
+    }
+    else
+    {
+      //     avatar->setRotation(gazeX * 5);
+      //     float b = avatar->getBreath();
+      servo_x.setEaseTo(START_DEGREE_VALUE_X);
+      //     servo_y.setEaseTo(START_DEGREE_VALUE_Y + b * 5);
+      servo_y.setEaseTo(START_DEGREE_VALUE_Y);
+    }
+    synchronizeAllServosStartAndWaitForAllServosToStop();
+#endif
+    delay(50);
+  }
+}
+
+void Servo_setup()
+{
+#ifdef USE_SERVO
+  if (servo_x.attach(SERVO_PIN_X, START_DEGREE_VALUE_X, DEFAULT_MICROSECONDS_FOR_0_DEGREE, DEFAULT_MICROSECONDS_FOR_180_DEGREE) == INVALID_SERVO)
+  {
+    Serial.print("Error attaching servo x");
+  }
+  if (servo_y.attach(SERVO_PIN_Y, START_DEGREE_VALUE_Y, DEFAULT_MICROSECONDS_FOR_0_DEGREE, DEFAULT_MICROSECONDS_FOR_180_DEGREE) == INVALID_SERVO)
+  {
+    Serial.print("Error attaching servo y");
+  }
+  servo_x.setEasingType(EASE_QUADRATIC_IN_OUT);
+  servo_y.setEasingType(EASE_QUADRATIC_IN_OUT);
+  setSpeedForAllServos(30);
+
+  servo_x.setEaseTo(START_DEGREE_VALUE_X);
+  servo_y.setEaseTo(START_DEGREE_VALUE_Y);
+  synchronizeAllServosStartAndWaitForAllServosToStop();
+#endif
+}
+#endif
 
 struct box_t
 {
@@ -1018,6 +1103,11 @@ void setup()
   }
   //  M5.Speaker.begin();
 
+#ifdef SCS0009
+#else
+  Servo_setup();
+  delay(1000);
+#endif
   {
     uint32_t nvs_handle;
     if (ESP_OK == nvs_open("setting", NVS_READONLY, &nvs_handle))
@@ -1182,15 +1272,27 @@ void setup()
   M5.Lcd.print("Connecting");
   Wifi_setup();
   M5.Lcd.println("\nConnected");
+
+#ifdef ENABLE_MDNS
+  if (MDNS.begin(MDNS_HOST))
+  {
+    Serial.println("MDNS responder started");
+    M5.Lcd.println("MDNS responder started");
+  }
+#endif
+
   Serial.printf_P(PSTR("Go to http://"));
   M5.Lcd.print("Go to http://");
   Serial.println(WiFi.localIP());
   M5.Lcd.println(WiFi.localIP());
 
-  // if (MDNS.begin("m5stack")) {
-  //   Serial.println("MDNS responder started");
-  //   M5.Lcd.println("MDNS responder started");
-  // }
+#ifdef ENABLE_MDNS
+  Serial.printf_P(PSTR("or http://%s.local"), PSTR(MDNS_HOST));
+  Serial.println();
+  M5.Lcd.printf("or http://%s.local", MDNS_HOST);
+  M5.Lcd.println();
+#endif
+
   delay(1000);
 
   server.on("/", handleRoot);
@@ -1254,11 +1356,16 @@ void setup()
   //  mp3->RegisterStatusCB(StatusCallback, (void*)"mp3");
   wakeword_init();
 
+#ifdef SCS0009
   initServo();
+#endif
 
   avatar.init();
   avatar.addTask(lipSync, "lipSync");
-  // avatar.addTask(servo, "servo");
+#ifdef SCS0009
+#else
+  avatar.addTask(servo, "servo");
+#endif
   avatar.setSpeechFont(&fonts::efontJA_16);
 
   //  M5.Speaker.setVolume(200);
